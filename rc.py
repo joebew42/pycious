@@ -1,6 +1,9 @@
 #!/usr/bin/env python2
 
 from __future__ import division
+
+import os
+
 from datetime import datetime
 
 from awrap import TextWidget, GraphWidget, Timer
@@ -10,13 +13,45 @@ from awrap import TextWidget, GraphWidget, Timer
 battery_widget = TextWidget("battery_widget")
 cpu_widget = GraphWidget("cpu_widget")
 mem_widget = GraphWidget("mem_widget")
+network_widget = TextWidget("network_widget")
 date_widget = TextWidget("date_widget")
 
 # # # BATTERY CHARGE FUNCTION # # #
 
 def battery():
     """Display power manager information"""
-    battery_widget.text(" -- BATTERY -- ")
+    try:
+        battery_path = '/sys/class/power_supply/BAT0/'
+        battery_text = ''
+        percent = 0
+
+        with open(battery_path + "present") as f:
+            charge_full = int(open(battery_path + "charge_full")\
+                .readline()[:-1])
+            charge_now = int(open(battery_path + "charge_now")\
+                .readline()[:-1])
+            state = open(battery_path + "status").readline()[:-1]
+
+            if state == 'Charging':
+                battery_text = '<span color=\\\"{0}\\\"><b>+</b> {1}%</span> '
+            elif state == 'Discharging':
+                battery_text = '<span color=\\\"{0}\\\"><b>-</b> {1}%</span> '
+
+            if state != 'Charged':
+                percent = int((charge_now / charge_full) * 100)
+                
+                if percent >= 60:
+                    color = 'green'
+                elif percent >= 20:
+                    color = 'yellow'
+                else:
+                    color = 'red'
+
+                battery_widget.text(battery_text.format(color,percent))
+            else:
+                battery_widget.text('')
+    except:
+        battery_widget.text("NO BATTERY PRESENT ")
 
 # # # CPU AND MEMORY LOAD FUNCTION # # #
 
@@ -101,7 +136,52 @@ def date():
 
 # # # NETWORK LOAD FUNCTION # # #
 
-# TODO
+ifaces = {}
+
+def network_statistics():
+    """
+    Collects and display information about iface network usage
+    """
+    
+    # Used to store temporary information to display
+    message = ""
+
+    try:
+        # Try to collect all interfaces available
+        # on the system
+        global ifaces
+        if len(ifaces) == 0:
+            ifaces = {iface:{'tx':0,'rx':0} \
+                        for iface in os.listdir('/sys/class/net/') \
+                        if iface != 'lo'} # Exclude lo interface, who cares!?
+
+        # For each interfaces display the statistics
+        message = ""
+        for iface in ifaces:
+            # Calculate actual values
+            rx = int(open('/sys/class/net/' + iface + '/statistics/rx_bytes')\
+                .readline())
+            tx = int(open('/sys/class/net/' + iface + '/statistics/tx_bytes')\
+                .readline())
+
+            # Format values
+            # TODO: May be useful format current usage regards bytes multiple
+            #       (e.g. KB, MB, GB, and so on...)
+            actual_rx = int((rx - ifaces[iface]['rx'])/1024)
+            actual_tx = int((tx - ifaces[iface]['tx'])/1024)
+            
+            # Format message
+            message += "[<b>{0}:</b> rx: {1}KB tx: {2}KB] ".format(
+                iface, actual_rx, actual_tx)
+
+            # Updates values
+            ifaces[iface]['rx'] = rx
+            ifaces[iface]['tx'] = tx
+
+        # Display message
+        network_widget.text(message)
+    except:
+        network_widget.text("Unable to fetch iface activity")
 
 # # # FILESYSTEM USAGE # # #
 
@@ -114,14 +194,17 @@ if __name__ == "__main__":
     # Define timer
     battery_timer = Timer(30)
     cpu_mem_timer = Timer(1)
+    network_timer = Timer(1)
     date_timer = Timer(60)
     
     # Attach functions to each timer
     battery_timer.add_signal("battery", battery)
     cpu_mem_timer.add_signal("cpu_mem", cpu_mem_usage)
+    network_timer.add_signal("network_statistics", network_statistics)
     date_timer.add_signal("date", date)
 
     # Starts all the timers
     battery_timer.start()
     cpu_mem_timer.start()
+    network_timer.start()
     date_timer.start()
